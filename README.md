@@ -19,31 +19,119 @@ tags:
 
 # GoEmotions em Português (pt-BR)
 
-Tradução para português do Brasil do [GoEmotions](https://github.com/google-research/google-research/tree/master/goemotions), um dataset de classificação de emoções com comentários do Reddit anotados com 28 rótulos de emoção (27 emoções e "neutral").
+Dataset de classificação de emoções em português do Brasil: tradução dos 54.263 comentários do Reddit do [GoEmotions](https://github.com/google-research/google-research/tree/master/goemotions) (28 rótulos de emoção), feita com modelos de linguagem por um pipeline em Python com validação automática.
 
 > **Status:** completo. Todos os 54.263 comentários do GoEmotions (treino, validação e teste) estão traduzidos. Veja [Status da tradução](#status-da-tradução).
 
 ## Sumário
 
-- [Sobre](#sobre)
+- [O problema](#o-problema)
+- [Como funciona](#como-funciona)
+- [Stack](#stack)
+- [Meu papel](#meu-papel)
+- [Contexto](#contexto)
+- [Próximos passos](#próximos-passos)
+- [Como rodar](#como-rodar)
 - [Estrutura do repositório](#estrutura-do-repositório)
 - [Formato dos dados](#formato-dos-dados)
 - [Rótulos de emoção](#rótulos-de-emoção)
 - [Estatísticas](#estatísticas)
 - [Status da tradução](#status-da-tradução)
-- [Como reproduzir](#como-reproduzir)
 - [Limitações e cuidados](#limitações-e-cuidados)
 - [Licença](#licença)
 - [Citação](#citação)
 - [Agradecimentos](#agradecimentos)
 
-## Sobre
+## O problema
 
-O GoEmotions original tem textos apenas em inglês. Este projeto traduz cada comentário para pt-BR, mantendo o tom, o registro informal, as gírias e a intensidade emocional do original. A tradução é feita automaticamente por modelos de linguagem, a partir de um prompt que pede tradução natural e adaptada, não literal.
+O GoEmotions é um dos principais datasets de emoções refinadas, mas seus textos existem apenas em inglês. Para treinar e avaliar classificadores de emoção em português do Brasil faltam dados com essa granularidade (28 rótulos) e com o registro informal típico da internet. Este projeto traduz cada comentário para pt-BR, mantendo o tom, as gírias e a intensidade emocional do original, para que os mesmos rótulos possam ser usados em português.
 
-Vários modelos participaram da tradução (veja [Status da tradução](#status-da-tradução)). O campo `translator` indica o modelo usado em cada registro. Registros sem esse campo foram traduzidos por um modelo anterior do Gemini (`gemini-3.1-flash-lite`).
+## Como funciona
 
-Os rótulos de emoção, os identificadores e a divisão treino/validação/teste são os do dataset original. Nenhum rótulo foi revisado ou alterado.
+O pipeline lê os TSVs originais, divide os comentários em lotes de 50, envia cada lote a um modelo de linguagem com um prompt de sistema e valida a resposta antes de gravar. Por fim, junta todos os lotes em um único arquivo `.jsonl`.
+
+```mermaid
+flowchart LR
+    A["raw/*.tsv<br/>GoEmotions original (inglês)"] --> B["prepare_batches.py<br/>lotes de 50 comentários"]
+    B --> C["batches/*.json<br/>texto original + rótulos"]
+    C --> D["translate.py<br/>LLM: Gemini ou Groq<br/>prompt de sistema + saída JSON"]
+    D --> E{"Validação automática<br/>ids, ordem e tradução não vazia"}
+    E -- "ids faltando" --> D
+    E -- "ok" --> F["translated/*_translated.json<br/>lotes traduzidos"]
+    F --> G["consolidate.py"]
+    G --> H["goemotions_pt_br_consolidated.jsonl<br/>54.263 registros"]
+
+    classDef llm fill:#fde68a,stroke:#b45309,color:#000;
+    class D llm;
+```
+
+O LLM entra apenas na etapa de `translate.py` (destacada no diagrama). As demais etapas são determinísticas.
+
+Como a tradução é feita:
+
+- **Lotes de 50.** `prepare_batches.py` divide cada TSV (`train`, `dev`, `test`) em lotes de 50 comentários, preservando `id`, `split`, `line_idx`, texto original e rótulos.
+- **Provedores.** `translate.py` suporta a API do Gemini (padrão) e a do Groq (`--provider groq`). Cada lote vai em uma requisição.
+- **Prompt de sistema.** Pede tradução natural e adaptada, não literal; preserva tom, emoção, registro, gírias, sarcasmo, xingamentos e intensidade; adapta expressões idiomáticas para equivalentes brasileiros; mantém tokens como `[NAME]` e `[RELIGION]` exatamente como estão; preserva emojis, emoticons, caixa alta e pontuação expressiva; não censura nem suaviza; trata cada item como independente.
+- **Saída JSON.** O modelo responde apenas com `{"items": [{"id": "...", "t": "tradução"}, ...]}`, um objeto por item, com o mesmo `id`. No Gemini a resposta segue um schema JSON; no Groq usa-se o modo `json_object`.
+- **Validação automática.** Cada item é conferido por `id`, e traduções ausentes ou vazias são rejeitadas. Em caso de erro, o script tenta de novo com espera crescente (backoff) e pede novamente só os `id`s que faltaram. Lotes já traduzidos são pulados, então a execução pode ser retomada.
+- **Último grupo.** Os 11.913 registros traduzidos por `gemini-3.8-flash-low` foram feitos por um agente de linha de comando (`agy`), lote a lote, seguindo as mesmas regras de tradução do `translate.py`, e validados da mesma forma: mesmos ids, mesma ordem e nenhuma tradução vazia.
+- **Consolidação.** `consolidate.py` junta os lotes traduzidos em `translated/goemotions_pt_br_consolidated.jsonl`.
+
+Os rótulos de emoção, os identificadores e a divisão treino/validação/teste são os do dataset original. Nenhum rótulo foi alterado. O campo `translator` indica o modelo usado em cada registro; registros sem esse campo foram traduzidos por um modelo anterior do Gemini (`gemini-3.1-flash-lite`).
+
+## Stack
+
+- Python 3.8+ usando somente a biblioteca padrão (`urllib`, `json`, `csv`, `argparse`), sem dependências externas.
+- APIs de LLM: Gemini (Google) e Groq (`openai/gpt-oss-120b`).
+- CLI de agente (`agy`) com `gemini-3.8-flash-low`, para o último grupo de lotes.
+- Formatos: TSV (entrada), JSON (lotes) e JSON Lines (saída final).
+- Metadados no padrão de dataset card do Hugging Face (front matter YAML no topo deste arquivo).
+
+## Meu papel
+
+Sou o autor deste repositório (João Pedro Panza Mainieri). Pelo histórico do Git, os commits que contêm o trabalho vieram do meu usuário, e o blame de `prepare_batches.py`, `translate.py`, `consolidate.py`, `LICENSE` e deste README aponta para ele. Isso cobre:
+
+- o pipeline de tradução: geração de lotes (`prepare_batches.py`), tradução com Gemini e Groq (`translate.py`) e consolidação (`consolidate.py`);
+- a execução das traduções e a adição dos lotes traduzidos, incluindo o suporte ao provedor Groq;
+- o arquivo consolidado `translated/goemotions_pt_br_consolidated.jsonl`;
+- o README e a licença Apache 2.0.
+
+O Pull Request #1 (suporte ao Groq e novos lotes) foi integrado ao repositório da organização por Vitória Ferreira, por meio de um merge.
+
+## Contexto
+
+Projeto da Residência em IA, Formação avançada em Inteligência Artificial (PUCC e Instituto de Pesquisas Eldorado), desenvolvido na organização Equilibrium-Residencia-IA. Mais informações sobre o programa: <https://formacao.eldorado.org.br/residencia-ia-pucc>.
+
+## Próximos passos
+
+- Análise exploratória dos dados (EDA) do dataset traduzido.
+- Publicação no Hugging Face e no Kaggle.
+
+Ambos estão planejados e ainda não foram feitos.
+
+## Como rodar
+
+Requisitos: Python 3.8+ (somente biblioteca padrão) e uma chave de API do Gemini ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)) ou do Groq.
+
+```bash
+# 1. Defina a chave (ou coloque GEMINI_API_KEY=... em um arquivo .env, que não é versionado)
+export GEMINI_API_KEY=sua_chave
+
+# 2. Gere os lotes: <split> <tamanho do lote> <máximo de lotes, 0 = todos>
+python prepare_batches.py train 50 0
+python prepare_batches.py dev 50 0
+python prepare_batches.py test 50 0
+
+# 3. Traduza (pula lotes já traduzidos, então pode ser reexecutado para retomar)
+python translate.py
+# Para testar com poucos lotes:
+python translate.py --pattern "dev_*" --limit 2
+
+# 4. Consolide em um único arquivo .jsonl
+python consolidate.py
+```
+
+O provedor padrão é o Gemini (`gemini-3.5-flash-lite`). Para usar o Groq, passe `--provider groq` e defina `GROQ_API_KEY` (modelo padrão `openai/gpt-oss-120b`). O modelo pode ser trocado com `--model` ou pelas variáveis `GEMINI_MODEL` / `GROQ_MODEL`. O script espera e tenta de novo automaticamente em caso de erro temporário; lotes que falharem são registrados em `translated/failed_batches.txt` e podem ser refeitos reexecutando `translate.py`. A execução completa pode levar horas.
 
 ## Estrutura do repositório
 
@@ -157,37 +245,13 @@ Quem traduziu cada registro (campo `translator`):
 | *(ausente)* → `gemini-3.1-flash-lite` | 23.950 | train (23.750), dev (200) | `translate.py`, com o modelo anterior do Gemini |
 | `gemini-3.5-flash-lite` | 17.000 | train | `translate.py` |
 | `openai/gpt-oss-120b` | 1.400 | train | `translate.py --provider groq` |
-| `gemini-3.8-flash-low` | 11.913 | train (1.260), dev (5.226), test (5.427) | CLI de agente `agy` com o modelo `gemini-3.8-flash-low`, após a cota diária da API do Gemini se esgotar |
+| `gemini-3.8-flash-low` | 11.913 | train (1.260), dev (5.226), test (5.427) | CLI de agente `agy` com o modelo `gemini-3.8-flash-low`, lote a lote |
 
 Os lotes do último grupo foram traduzidos por um agente, lote a lote, seguindo as mesmas regras de tradução do `translate.py`, e validados automaticamente (mesmos ids, mesma ordem, nenhuma tradução vazia).
 
-O arquivo `translated/failed_batches.txt` é um registro histórico das falhas (cota excedida e erros de rede) das primeiras execuções. Todos esses lotes foram traduzidos depois.
+O arquivo `translated/failed_batches.txt` é um registro histórico das falhas das primeiras execuções. Todos esses lotes foram traduzidos depois.
 
 Para regenerar o arquivo consolidado a partir dos lotes, rode `python consolidate.py`.
-
-## Como reproduzir
-
-Requisitos: Python 3.8+ (somente biblioteca padrão) e uma chave de API: do Gemini, disponível gratuitamente em [aistudio.google.com/apikey](https://aistudio.google.com/apikey), ou do Groq.
-
-```bash
-# 1. Defina a chave (ou coloque GEMINI_API_KEY=... em um arquivo .env, que não é versionado)
-export GEMINI_API_KEY=sua_chave
-
-# 2. Gere os lotes: <split> <tamanho do lote> <máximo de lotes, 0 = todos>
-python prepare_batches.py train 50 0
-python prepare_batches.py dev 50 0
-python prepare_batches.py test 50 0
-
-# 3. Traduza (pula lotes já traduzidos, então pode ser reexecutado para retomar)
-python translate.py
-# Para testar com poucos lotes:
-python translate.py --pattern "dev_*" --limit 2
-
-# 4. Consolide em um único arquivo .jsonl
-python consolidate.py
-```
-
-O provedor padrão é o Gemini (`gemini-3.5-flash-lite`). Para usar o Groq, passe `--provider groq` e defina `GROQ_API_KEY` (modelo padrão `openai/gpt-oss-120b`). O modelo pode ser trocado com `--model` ou pelas variáveis `GEMINI_MODEL` / `GROQ_MODEL`. Os planos gratuitos têm limite de uso; o script espera e tenta de novo automaticamente, mas se a cota diária acabar, os lotes que falharem ficam de fora e precisam ser refeitos depois. A execução completa pode levar horas.
 
 ## Limitações e cuidados
 
