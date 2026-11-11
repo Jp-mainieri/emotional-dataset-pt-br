@@ -89,14 +89,14 @@ Os rótulos de emoção, os identificadores e a divisão treino/validação/test
 
 ## Meu papel
 
-Sou o autor deste repositório (João Pedro Panza Mainieri). Pelo histórico do Git, os commits que contêm o trabalho vieram do meu usuário, e o blame de `prepare_batches.py`, `translate.py`, `consolidate.py`, `LICENSE` e deste README aponta para ele. Isso cobre:
+Fui responsável pelo pipeline e pela montagem do dataset:
 
 - o pipeline de tradução: geração de lotes (`prepare_batches.py`), tradução com Gemini e Groq (`translate.py`) e consolidação (`consolidate.py`);
 - a execução das traduções e a adição dos lotes traduzidos, incluindo o suporte ao provedor Groq;
 - o arquivo consolidado `translated/goemotions_pt_br_consolidated.jsonl`;
 - o README e a licença Apache 2.0.
 
-O Pull Request #1 (suporte ao Groq e novos lotes) foi integrado ao repositório da organização por Vitória Ferreira, por meio de um merge.
+O Pull Request #1 (suporte ao Groq e novos lotes) foi integrado ao repositório da organização por Vitória Ferreira.
 
 ## Contexto
 
